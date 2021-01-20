@@ -13,7 +13,7 @@ def envByDates():
             date_dict[date] = [row[1:].to_dict()]
 
         # Only do first 100 days
-        if idx == 100:
+        if idx == 1000:
             break
 
     names = list(df['symbol'].unique())

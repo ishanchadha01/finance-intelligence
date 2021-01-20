@@ -3,7 +3,6 @@ import gym
 from gym import spaces
 from trader import Trader
 from preprocessing import envByDates
-from matplotlib import pyplot as plt
 
 class MarketEnv(gym.Env):
   """
@@ -13,7 +12,7 @@ class MarketEnv(gym.Env):
   # Because of google colab, we cannot implement the GUI ('human' render mode)
   metadata = {'render.modes': ['human']}
 
-  def __init__(self, envByDates=envByDates(), portfolio_size=30):
+  def __init__(self, envByDates=envByDates(), portfolio_size=100):
     #super(MarketEnv, self).__init__()
 
     # Get dates and changes for each stock by date from preprocessing
@@ -23,8 +22,8 @@ class MarketEnv(gym.Env):
     self.trader = Trader()
     self.date_idx = 0
     self.trader.date = self.dates[self.date_idx]
-    self.available_stocks = self.stocks_by_date[self.trader.date][:30]
     self.portfolio_size = portfolio_size
+    self.available_stocks = self.stocks_by_date[self.trader.date][:self.portfolio_size]
 
     # Basic info
     self.reward = 0
@@ -35,7 +34,7 @@ class MarketEnv(gym.Env):
     self.final = False
     self.action_space = spaces.Box(low = -1, high = 1,shape = (portfolio_size,))
 
-    # Observation space is [trader money, stock prices 1-30]
+    # Observation space is [trader money, stock prices 1-self.portfolio_size]
     self.observation_space = spaces.Box(low=0, high=np.inf, shape = (self.portfolio_size+1,)) 
     self.state = [self.trader.money] + [stock['close'] for stock in self.available_stocks]
 
@@ -55,7 +54,7 @@ class MarketEnv(gym.Env):
       self.trader = Trader()
       self.date_idx = 0
       self.trader.date = self.dates[self.date_idx]
-      self.available_stocks = self.stocks_by_date[self.trader.date][:30]
+      self.available_stocks = self.stocks_by_date[self.trader.date][:100]
       self.reward = 0
       self.cost = 0
       self.trades = 0
@@ -71,7 +70,7 @@ class MarketEnv(gym.Env):
       self.asset_memory = [previous_total_asset]
       self.date_idx = 0
       self.trader.date = self.dates[self.date_idx]
-      self.available_stocks = self.stocks_by_date[self.trader.date][:30]
+      self.available_stocks = self.stocks_by_date[self.trader.date][:self.portfolio_size]
       self.cost = 0
       self.trades = 0
       self.final = False
@@ -86,7 +85,6 @@ class MarketEnv(gym.Env):
     # Update balance
     self.state[0] -= self.state[index+1]*min(available_amount, action)
     self.state[index+1] += min(available_amount, action)
-    self.cost+=min(available_amount, action)
     self.trades+=1
 
 
@@ -95,7 +93,6 @@ class MarketEnv(gym.Env):
       # Update balance
       self.state[0] += min(abs(action),self.state[index+1])
       self.state[index+1] -= min(abs(action), self.state[index+1])
-      self.cost += min(abs(action),self.state[index+1])
       self.trades+=1
       
     
@@ -104,10 +101,12 @@ class MarketEnv(gym.Env):
     self.final = bool(self.date_idx >= len(self.dates) - 1)
 
     if not self.final:
-      begin_total_asset = self.state[0]+ \
-      sum(np.array(self.state[1:(self.portfolio_size+1)]))
+      begin_total_asset = sum(np.array(self.state[:(self.portfolio_size+1)]))
       
       argsort_actions = np.argsort(actions)
+
+      if np.isnan(np.sum(actions)):
+        actions[np.isnan(actions)] = 0 # remove nan elements from vector
       
       sell_index = argsort_actions[:np.where(actions < 0)[0].shape[0]]
       buy_index = argsort_actions[::-1][:np.where(actions > 0)[0].shape[0]]
@@ -120,7 +119,7 @@ class MarketEnv(gym.Env):
 
       self.date_idx += 1
       self.trader.date = self.dates[self.date_idx]
-      self.available_stocks = self.stocks_by_date[self.trader.date][:30]
+      self.available_stocks = self.stocks_by_date[self.trader.date][:self.portfolio_size]
       self.state =  [self.state[0]] + \
               list(self.state[1:(self.portfolio_size+1)])
       
@@ -128,19 +127,21 @@ class MarketEnv(gym.Env):
       sum(np.array(self.state[1:(self.portfolio_size+1)]))
       self.asset_memory.append(end_total_asset)
       
-      self.reward = end_total_asset - begin_total_asset
+      self.reward = (end_total_asset - begin_total_asset) * 0.01
       self.rewards_memory.append(self.reward)
     
     else:
+      '''
       plt.plot(self.asset_memory,'r')
       plt.show()
       plt.plot(self.rewards_memory,'r')
       plt.show()
+      '''
 
     return self.state, self.reward, self.final, {}
 
 
-  def render(self, mode='console'):
+  def render(self, mode='human'):
     return self.state
 
 
