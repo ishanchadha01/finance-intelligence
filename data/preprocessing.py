@@ -93,10 +93,4 @@ def preprocessing_5year(datapath: str):
 
 if __name__=='__main__':
     stock_data = preprocessing_5year('./five_year')
-    print(stock_data)
-    '''
-    json_file = json.dumps(stock_data)
-    f = open("data.json","w")
-    f.write(json_file)
-    f.close()
-    '''
+    stock_data.to_csv('./five_year.csv')
