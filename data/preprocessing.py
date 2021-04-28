@@ -14,7 +14,7 @@ def preprocessing_5year(datapath: str):
         fpath = os.path.join(datapath, fname)
         name = fname.split('.')[0]
         stock_data = pd.read_csv(fpath)
-        stock_data = stock_data.drop(columns=['Open', 'High', 'Low', 'Adj Close', 'Volume'])
+        stock_data = stock_data.drop(columns=['Date', 'Open', 'High', 'Low', 'Adj Close', 'Volume'])
         
         # Get list of close prices
         prices = stock_data.loc[:, 'Close'].values
@@ -91,6 +91,12 @@ def preprocessing_5year(datapath: str):
     return df
 
 
+def check_null(df):
+    df = df.fillna(method='ffill', inplace=True)
+    return df
+
 if __name__=='__main__':
     stock_data = preprocessing_5year('./five_year')
+    check_null(stock_data)
+    print(stock_data)
     stock_data.to_csv('./five_year.csv')
