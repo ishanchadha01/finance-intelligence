@@ -4,9 +4,6 @@ import random
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-from collections import namedtuple
-from itertools import count
-from PIL import Image
 import time
 import pandas as pd
 from tqdm import tqdm
@@ -17,19 +14,6 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torchvision.transforms as T
-
-class FirstModel():
-    def __init__(self):
-        pass
-
-    def output(self, stock_name, stock):
-        sharpe = stock['sharpe']
-        if sharpe > 0:
-            return 1
-        elif sharpe < 0:
-            return -1
-        else:
-            return 0
 
 
 class LSTM(nn.Module):
