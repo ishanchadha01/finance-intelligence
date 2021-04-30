@@ -1,15 +1,20 @@
-import os
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
+from sklearn.metrics import classification_report
 from transformers import AdamW, get_linear_schedule_with_warmup
-from transformers import AutoModel, BertTokenizerFast
+from transformers import AutoModel, AutoTokenizer
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 import matplotlib
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+import sys
+sys.path.append('../plots')
+from plot_classification_report import plot_classification_report
 
 
 class BertSentimentClassifier(nn.Module):
@@ -20,7 +25,7 @@ class BertSentimentClassifier(nn.Module):
         self.dropout = nn.Dropout(0.1)
         self.relu =  nn.ReLU()
         self.fc1 = nn.Linear(768,512)
-        self.fc2 = nn.Linear(512,2)
+        self.fc2 = nn.Linear(512,3)
         self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, sent_id, mask):
@@ -33,8 +38,8 @@ class BertSentimentClassifier(nn.Module):
         return x
 
 
-def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
-
+def train_val_test_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
+    
     df = data
 
     # Load training data
@@ -65,9 +70,10 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
 
     # Tokenize and encode sequences in the training set
     tokens_train = tokenizer.batch_encode_plus(
-        train_y.tolist(),
+        train_x.tolist(),
         max_length = max_seq_len,
         pad_to_max_length=True,
+        padding='max_length',
         truncation=True,
         return_token_type_ids=False
     )
@@ -75,8 +81,8 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
     # Tokenize and encode sequences in the validation set
     tokens_val = tokenizer.batch_encode_plus(
         val_x.tolist(),
-        max_length = max_seq_len,
-        pad_to_max_length=True,
+        max_length=max_seq_len,
+        padding='max_length',
         truncation=True,
         return_token_type_ids=False
     )
@@ -84,8 +90,8 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
     # Tokenize and encode sequences in the test set
     tokens_test = tokenizer.batch_encode_plus(
         test_x.tolist(),
-        max_length = max_seq_len,
-        pad_to_max_length=True,
+        max_length=max_seq_len,
+        padding='max_length',
         truncation=True,
         return_token_type_ids=False
     )
@@ -93,6 +99,7 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
     # Train set
     train_seq = torch.tensor(tokens_train['input_ids'])
     train_mask = torch.tensor(tokens_train['attention_mask'])
+    train_y_copy = train_y
     train_y = torch.tensor(train_y.tolist())
 
     # Validation set
@@ -119,9 +126,9 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
         param.requires_grad = False
 
     # Get class weights and loss function
-    class_wts = compute_class_weight('balanced', np.unique(train_y), train_y)
+    class_wts = compute_class_weight('balanced', np.unique(train_y_copy), train_y_copy)
     weights = torch.tensor(class_wts,dtype=torch.float)
-    loss = nn.NLLLoss(weight=weights)
+    cross_entropy_loss = nn.NLLLoss(weight=weights)
     
     # Perform training and validation
     best_valid_loss = float('inf')
@@ -137,17 +144,17 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
         total_loss, total_accuracy = 0,0
         
         # Iterate over batches
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in tqdm(enumerate(train_dataloader)):
             
             # Give progress every 50 batches
-            if step % 50 == 0 and not step == 0:
+            if step % 20 == 0:
                 print('  Batch {:>5,}  of  {:>5,}.'.format(step, len(train_dataloader)))
 
             # Clear gradient, compute loss, and backward pass for new gradient
             sent_id, mask, labels = batch
             model.zero_grad()
             preds = model(sent_id, mask)
-            loss = loss(preds, labels)
+            loss = cross_entropy_loss(preds, labels)
             total_loss = total_loss + loss.item()
             loss.backward()
 
@@ -169,14 +176,14 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
         for step,batch in enumerate(val_dataloader):
             
             # Give progress every 50 batches
-            if step % 50 == 0 and not step == 0:
+            if step % 20 == 0:
                 print('  Batch {:>5,}  of  {:>5,}.'.format(step, len(val_dataloader)))
 
             # Compute validation loss
             sent_id, mask, labels = batch
             with torch.no_grad():
                 preds = model(sent_id, mask)
-                loss = loss(preds,labels)
+                loss = cross_entropy_loss(preds,labels)
                 total_loss = total_loss + loss.item()
 
         valid_loss = total_loss / len(val_dataloader)
@@ -184,21 +191,36 @@ def train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs):
         # Save best model
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
-            torch.save(model.state_dict(), 'trained_bert.pth')
+            torch.save(model.state_dict(), './saved_models/trained_bert.pth')
 
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
         print(f'\nTraining Loss: {train_loss:.3f}')
         print(f'Validation Loss: {valid_loss:.3f}')
 
+    plt.plot(train_losses, label='Training Loss')
+    plt.plot(valid_losses, label='Validation Loss')
+    plt.title('Sentiment Analysis Loss')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.savefig('../plots/loss_sentiment_analysis.png')
+
+    # Testing
+    model.load_state_dict(torch.load('./saved_models/trained_bert.pth'))
+    with torch.no_grad():
+        preds = model(test_seq, test_mask)
+    preds = np.argmax(preds, axis=1)
+    cr = classification_report(test_y, preds)
+    plot_classification_report(cr, '../plots/classification_report_sentiment_analysis.png')
+
 
 
 if __name__=='__main__':
-    bert = AutoModel.from_pretrained('bert-base-uncased')
-    tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
+    bert = AutoModel.from_pretrained('bert-base-uncased', return_dict=False)
+    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased', use_fast=False)
     batch_size = 32
-    data = pd.read_csv('../data/raw_data/financial_news_data.csv')
-    model = BertSentimentClassifier()
+    data = pd.read_csv('../data/raw_data/news_training_data.csv')
+    model = BertSentimentClassifier(bert)
     optimizer = AdamW(model.parameters(), lr = 1e-3)
-    num_epochs = 10
-    train_bert(model, tokenizer, optimizer, data, batch_size, num_epochs)
+    num_epochs = 25
+    train_val_test_bert(model, tokenizer, optimizer, data, batch_size, num_epochs)
