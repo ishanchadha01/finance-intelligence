@@ -8,6 +8,7 @@ from selenium.webdriver.common.keys import Keys
 
 def load_stock_data(stock_name, scraped_out):
     
+    # Get stock-related news from Reuters as well as date
     df = pd.DataFrame(columns=['Date', 'Text'])
     date = datetime.datetime(2021, 4, 28)
     driver = webdriver.Chrome()
@@ -30,6 +31,8 @@ def load_stock_data(stock_name, scraped_out):
     for link, description in zip(links, descriptions):
         driver.get(link)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
+
+        # Try to find date information if available
         try:
             dates = soup.find_all('span', {'class': 'DateLine__date___12trWy'})
             datetimes = [date for date in dates]
