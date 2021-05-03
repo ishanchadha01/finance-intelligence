@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from torch.autograd import Variable
 import matplotlib.pyplot as plt
  
 
@@ -10,20 +9,23 @@ class SOM(nn.Module):
     2D Self-organizing map with Gaussian kernel similarity function
     and particle swarm optimization for update step
     """
-    def __init__(self, x, y, dim, num_iters, lr=.3, sigma=None):
+    def __init__(self, x, y, dim, num_iters, learning_radius=.3, sigma=None, cognitive=.1, social=.1, inertia=0.5):
         super(SOM, self).__init__()
         self.x = x
         self.y = y
         self.dim = dim
         self.num_iters = num_iters
-        self.lr = lr
+        self.learning_radius = learning_radius
+        self.cognitive = cognitive
+        self.social = social
+        self.inertia = inertia
 
         if sigma is None:
             self.sigma = max(m, n) / 2.0
 
-        self.weights = torch.randn(m*n, dim)
-        self.positions = torch.LongTensor(np.array(list(self.neuron_locations())))
-        self.velocities = torch.LongTensor(np.array(list(self.neuron_velocities())))
+        self.grid_locations = torch.LongTensor(np.array(list(self.neuron_locations())))
+        self.particles = torch.randn(m*n, dim)
+        self.velocities = torch.zeros(m*n, dim)
         self.pdist = nn.PairwiseDistance(p=2)
 
     def neuron_locations(self):
@@ -32,40 +34,72 @@ class SOM(nn.Module):
             for j in range(self.y):
                 yield np.array([i, j])
 
-    def neuron_velocities(self):
-        # Initialize velocities facing outward from center
-        for i in range(self.x):
-            for j in range(self.y):
-                yield np.array([i - np.floor(self.x/2), j - np.floor(self.y/2)])
-
     def map_vectors(self, input_vectors):
         output = []
         for vector in input_vectors:
-            min_idx = min([i for i in range(len(self.weights))],
-                            key=lambda idx: np.linalg.norm(vector-self.weights[idx]))
-            output.append(self.positions[min_idx])
+            min_idx = min([i for i in range(len(self.particles))],
+                            key=lambda idx: np.linalg.norm(vector-self.particles[idx]))
+            output.append(self.grid_locations[min_idx])
         return output
 
-    def forward(self, x, it):
-        dists = self.pdist(torch.stack([x for i in range(self.x*self.y)]), self.weights)
-        _, bmu_index = torch.min(dists, 0)
-        bmu_loc = self.positions[bmu_index,:]
+    def particle_swarm_update(self, bmu_idx, neighborhood, radius):
+        global_best = self.particles[bmu_idx]
+        global_nbest = neighborhood[bmu_idx].float()
+        for idx in range(len(self.particles)):
+            particle = self.particles[idx]
+            velocity = self.velocities[idx]
+
+            # Check if particle is in learning radius
+            if global_nbest - neighborhood[idx].float() > radius:
+                continue
+
+            # Update each dimension of particle
+            for dim in range(self.dim):
+                r1 = np.random.rand()
+                r2 = np.random.rand()
+                v_cognitive = self.cognitive * r1 * (global_best[dim] - particle[dim])
+                v_social = self.social * r2 * (global_best[dim] - particle[dim])
+                v_update = self.inertia * velocity[dim] + v_cognitive + v_social
+                self.velocities[idx][dim] = v_update
+                p_update = particle[dim] + v_update
+                if p_update > 1:
+                    p_update = 1
+                elif p_update < 0:
+                    p_update = 0
+                self.particles[idx][dim] = particle[dim] + v_update
+
+
+    def kernel_func(self, bmu_loc, sigma):
+        bmu_distance_squares = torch.sum(torch.pow(self.grid_locations.float() \
+            - torch.stack([bmu_loc for i in range(self.x*self.y)]).float(), 2), 1)
+        return torch.exp(torch.neg(torch.div(bmu_distance_squares, sigma**2)))
+
+    def forward(self, input, iter_num):
+
+        # Find distance from input vector to each particle, which is location of each particle
+        dists = self.pdist(torch.stack([input for i in range(self.x*self.y)]), self.particles)
+        
+        # Best matching unit is grid location in x by y grid
+        _, bmu_idx = torch.min(dists, 0)
+        bmu_loc = self.grid_locations[bmu_idx,:]
         bmu_loc = bmu_loc.squeeze()
-        
-        learning_rate_op = 1.0 - it/self.num_iters
-        alpha_op = self.lr * learning_rate_op
-        sigma_op = self.sigma * learning_rate_op
 
-        bmu_distance_squares = torch.sum(torch.pow(self.positions.float() - torch.stack([bmu_loc for i in range(self.x*self.y)]).float(), 2), 1)
-        
-        neighbourhood_func = torch.exp(torch.neg(torch.div(bmu_distance_squares, sigma_op**2)))
-        
-        learning_rate_op = alpha_op * neighbourhood_func
+        # Update learning rate and sigma for time decay
+        decay = 1.0 - iter_num/self.num_iters
+        lr_decay = self.learning_radius * decay
+        sigma_decay = self.sigma * decay
 
-        learning_rate_multiplier = torch.stack([learning_rate_op[i:i+1].repeat(self.dim) for i in range(self.x*self.y)])
-        delta = torch.mul(learning_rate_multiplier, (torch.stack([x for i in range(self.x*self.y)]) - self.weights))                                         
-        new_weights = torch.add(self.weights, delta)
-        self.weights = new_weights
+        # Gaussian kernel function for neighborhood function
+        neighborhood = self.kernel_func(bmu_loc, sigma_decay)
+        
+        self.particle_swarm_update(bmu_idx, neighborhood, lr_decay)
+
+        # Update step
+        # learning_rate_op = alpha_decay * neighborhood
+        # learning_rate_multiplier = torch.stack([learning_rate_op[i:i+1].repeat(self.dim) for i in range(self.x*self.y)])
+        # delta = torch.mul(learning_rate_multiplier, (torch.stack([input for i in range(self.x*self.y)]) - self.particles))                                         
+        # new_particles = torch.add(self.particles, delta)
+        # self.particles = new_particles
 
 
 if __name__=='__main__':
@@ -100,7 +134,7 @@ if __name__=='__main__':
         data.append(torch.FloatTensor(colors[i,:]))
     
     #Train a 20x30 SOM with 100 iterations
-    n_iter = 100
+    n_iter = 10
     som = SOM(m, n, 3, n_iter)
     for iter_no in range(n_iter):
         #Train with each vector one by one
@@ -109,8 +143,8 @@ if __name__=='__main__':
 
     #Store a centroid grid for easy retrieval later on
     centroid_grid = [[] for i in range(m)]
-    weights = som.weights
-    positions = som.positions
+    weights = som.particles
+    positions = som.grid_locations
     for i, loc in enumerate(positions):
         centroid_grid[loc[0]].append(weights[i].numpy())
     
