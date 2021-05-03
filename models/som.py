@@ -9,7 +9,7 @@ class SOM(nn.Module):
     2D Self-organizing map with Gaussian kernel similarity function
     and particle swarm optimization for update step
     """
-    def __init__(self, x, y, dim, num_iters, learning_radius=.3, sigma=None, cognitive=.1, social=.1, inertia=0.5):
+    def __init__(self, x, y, dim, num_iters, learning_radius=.3, sigma=None, cognitive=0.1, social=0.5, inertia=0.5):
         super(SOM, self).__init__()
         self.x = x
         self.y = y
@@ -53,12 +53,23 @@ class SOM(nn.Module):
             if global_nbest - neighborhood[idx].float() > radius:
                 continue
 
+            # Find centroid of particles within radius of current point
+            boolArr = neighborhood <= neighborhood[idx].float() + radius
+            region = self.particles[boolArr]
+            centroid = region.mean(axis=0)
+
             # Update each dimension of particle
             for dim in range(self.dim):
                 r1 = np.random.rand()
                 r2 = np.random.rand()
-                v_cognitive = self.cognitive * r1 * (global_best[dim] - particle[dim])
+
+                # Move in individual direction, which is towards centroid
+                v_cognitive = self.cognitive * r1 * (centroid[dim] - particle[dim])
+
+                # Move towards global best
                 v_social = self.social * r2 * (global_best[dim] - particle[dim])
+
+                # Update position and velocity
                 v_update = self.inertia * velocity[dim] + v_cognitive + v_social
                 self.velocities[idx][dim] = v_update
                 p_update = particle[dim] + v_update
@@ -92,14 +103,8 @@ class SOM(nn.Module):
         # Gaussian kernel function for neighborhood function
         neighborhood = self.kernel_func(bmu_loc, sigma_decay)
         
+        # Update step with PSO
         self.particle_swarm_update(bmu_idx, neighborhood, lr_decay)
-
-        # Update step
-        # learning_rate_op = alpha_decay * neighborhood
-        # learning_rate_multiplier = torch.stack([learning_rate_op[i:i+1].repeat(self.dim) for i in range(self.x*self.y)])
-        # delta = torch.mul(learning_rate_multiplier, (torch.stack([input for i in range(self.x*self.y)]) - self.particles))                                         
-        # new_particles = torch.add(self.particles, delta)
-        # self.particles = new_particles
 
 
 if __name__=='__main__':
