@@ -137,12 +137,12 @@ if __name__=='__main__':
     train_SOM(data, som, n_iter, '../data/raw_data/EURUSD_fluctuations.csv')
 
     # Plot
-    # particles = som.particles.numpy()
-    # fig = plt.figure()
-    # ax = Axes3D(fig)
-    # plt.title('Currency SOM')
-    # ax.scatter(particles[:,0], particles[:,1], particles[:,2])
-    # plt.show()
+    particles = som.particles.numpy()
+    fig = plt.figure()
+    ax = Axes3D(fig)
+    plt.title('Currency SOM')
+    ax.scatter(particles[:,0], particles[:,1], particles[:,2])
+    plt.show()
 
     # # Get line of best fit
     # ax.set_xlabel("EURUSD")
