@@ -104,6 +104,15 @@ def test_LSTMs(name, model, data, iter_num):
     model.load_state_dict(torch.load('../models/saved_models/lstm/{}_lstm_{}.pth'.format(name, iter_num)))
 
     outputs = model(x_test)
+
+    # Plot
+    # plt.plot(outputs.detach().numpy(), label='Predictions')
+    # plt.plot(y_test.numpy(), label='Actual Prices')
+    # plt.xlabel('Days')
+    # plt.ylabel('Prices')
+    # plt.title('LSTM Predictions')
+    # plt.show()
+
     return outputs.detach().numpy(), y_test.numpy()
 
     
@@ -114,5 +123,9 @@ if __name__=='__main__':
     model = LSTM()
     criterion = torch.nn.MSELoss(reduction='mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
-    train_LSTMs('GE', model, data, 1000000, optimizer, criterion)
+    #train_LSTMs('GE', model, data, 1000000, optimizer, criterion)
     test_LSTMs('GE', model, data, 90000)
+    plt.plot(pd.read_csv('./results/lstm/loss.csv', header=None).to_numpy()[0][1:])
+    plt.title('LSTM Loss')
+    plt.xlabel('Epochs')
+    plt.show()
