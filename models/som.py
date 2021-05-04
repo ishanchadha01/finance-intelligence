@@ -2,6 +2,11 @@ import torch
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+from tqdm import tqdm
+from mpl_toolkits.mplot3d import Axes3D
+import random
+from sklearn import linear_model
  
 
 class SOM(nn.Module):
@@ -9,8 +14,9 @@ class SOM(nn.Module):
     2D Self-organizing map with Gaussian kernel similarity function
     and particle swarm optimization for update step
     """
-    def __init__(self, x, y, dim, num_iters, learning_radius=.3, sigma=None, cognitive=0.1, social=0.5, inertia=0.5):
+    def __init__(self, particle_inits, x, y, dim, num_iters, learning_radius=0.5, sigma=None, cognitive=.01, social=.1, inertia=1e-3):
         super(SOM, self).__init__()
+        self.particle_inits = particle_inits
         self.x = x
         self.y = y
         self.dim = dim
@@ -21,11 +27,12 @@ class SOM(nn.Module):
         self.inertia = inertia
 
         if sigma is None:
-            self.sigma = max(m, n) / 2.0
-
+            self.sigma = max(self.x, self.y) / 2.0
         self.grid_locations = torch.LongTensor(np.array(list(self.neuron_locations())))
-        self.particles = torch.randn(m*n, dim)
-        self.velocities = torch.zeros(m*n, dim)
+        self.particles = torch.rand(self.x * self.y, dim)
+        for d in range(len(self.particles[0])):
+            self.particles[:, d] *= particle_inits[d]
+        self.velocities = torch.zeros(self.x * self.y, dim)
         self.pdist = nn.PairwiseDistance(p=2)
 
     def neuron_locations(self):
@@ -33,14 +40,6 @@ class SOM(nn.Module):
         for i in range(self.x):
             for j in range(self.y):
                 yield np.array([i, j])
-
-    def map_vectors(self, input_vectors):
-        output = []
-        for vector in input_vectors:
-            min_idx = min([i for i in range(len(self.particles))],
-                            key=lambda idx: np.linalg.norm(vector-self.particles[idx]))
-            output.append(self.grid_locations[min_idx])
-        return output
 
     def particle_swarm_update(self, bmu_idx, neighborhood, radius):
         global_best = self.particles[bmu_idx]
@@ -73,14 +72,11 @@ class SOM(nn.Module):
                 v_update = self.inertia * velocity[dim] + v_cognitive + v_social
                 self.velocities[idx][dim] = v_update
                 p_update = particle[dim] + v_update
-                if p_update > 1:
-                    p_update = 1
-                elif p_update < 0:
-                    p_update = 0
                 self.particles[idx][dim] = particle[dim] + v_update
 
-
     def kernel_func(self, bmu_loc, sigma):
+
+        # Gaussian kernel function
         bmu_distance_squares = torch.sum(torch.pow(self.grid_locations.float() \
             - torch.stack([bmu_loc for i in range(self.x*self.y)]).float(), 2), 1)
         return torch.exp(torch.neg(torch.div(bmu_distance_squares, sigma**2)))
@@ -107,62 +103,79 @@ class SOM(nn.Module):
         self.particle_swarm_update(bmu_idx, neighborhood, lr_decay)
 
 
-if __name__=='__main__':
-    m = 20
-    n = 30
+def train_SOM(data, model, iters, csv_name):
+    for it in tqdm(range(iters)):
+        for i in tqdm(range(len(data))):
+            som(data[i], it)
+    particles = som.particles.numpy()
+    model = linear_model.LinearRegression()
+    model.fit(particles[:,1:], particles[:,0])
+    coefs = model.coef_
+    intercept = model.intercept_
+    diffs = []
+    for particle in curr_list:
+        diffs.append(particle[0] - (intercept + coefs[0]*particle[1] + coefs[1]*particle[2]))
+    pd.DataFrame(np.array(diffs), columns=['EURUSD Fluctuations']).to_csv(csv_name)
 
-    #Training inputs for RGBcolors
-    colors = np.array(
-        [[0., 0., 0.],
-        [0., 0., 1.],
-        [0., 0., 0.5],
-        [0.125, 0.529, 1.0],
-        [0.33, 0.4, 0.67],
-        [0.6, 0.5, 1.0],
-        [0., 1., 0.],
-        [1., 0., 0.],
-        [0., 1., 1.],
-        [1., 0., 1.],
-        [1., 1., 0.],
-        [1., 1., 1.],
-        [.33, .33, .33],
-        [.5, .5, .5],
-        [.66, .66, .66]])
-    color_names = \
-        ['black', 'blue', 'darkblue', 'skyblue',
-        'greyblue', 'lilac', 'green', 'red',
-        'cyan', 'violet', 'yellow', 'white',
-        'darkgrey', 'mediumgrey', 'lightgrey']
+
+if __name__=='__main__':
+
+    # Train currency inputs
+    currencies = pd.read_csv('../data/input.csv')
+    curr_list = currencies[['EURUSD', 'USDJPY', 'EURJPY']].to_numpy()
+    particle_inits = curr_list.mean(axis=0)
 
     data = list()
-    for i in range(colors.shape[0]):
-        data.append(torch.FloatTensor(colors[i,:]))
+    for i in range(curr_list.shape[0]):
+        data.append(torch.FloatTensor(curr_list[i,:]))
     
     #Train a 20x30 SOM with 100 iterations
+    m = 4
+    n = 6
     n_iter = 10
-    som = SOM(m, n, 3, n_iter)
-    for iter_no in range(n_iter):
-        #Train with each vector one by one
-        for i in range(len(data)):
-            som(data[i], iter_no)
+    som = SOM(particle_inits, m, n, 3, n_iter)
+    train_SOM(data, som, n_iter, '../data/raw_data/EURUSD_fluctuations.csv')
 
-    #Store a centroid grid for easy retrieval later on
-    centroid_grid = [[] for i in range(m)]
-    weights = som.particles
-    positions = som.grid_locations
-    for i, loc in enumerate(positions):
-        centroid_grid[loc[0]].append(weights[i].numpy())
-    
-    #Get output grid
-    image_grid = centroid_grid
+    # Plot
+    # particles = som.particles.numpy()
+    # fig = plt.figure()
+    # ax = Axes3D(fig)
+    # plt.title('Currency SOM')
+    # ax.scatter(particles[:,0], particles[:,1], particles[:,2])
+    # plt.show()
 
-    #Map colours to their closest neurons
-    mapped = som.map_vectors(torch.Tensor(colors))
+    # # Get line of best fit
+    # ax.set_xlabel("EURUSD")
+    # ax.set_ylabel("USDJPY")
+    # ax.set_zlabel("EURJPY")
+    # ax.set_xlim(np.min(particles[:, 0]), np.max(particles[:, 0]))
+    # ax.set_ylim(np.min(particles[:, 1]), np.max(particles[:, 1]))
+    # ax.set_zlim(np.min(particles[:, 2]), np.max(particles[:, 2]))
 
-    #Plot
-    plt.imshow(image_grid)
-    plt.title('Color SOM')
-    for i, m in enumerate(mapped):
-        plt.text(m[1], m[0], color_names[i], ha='center', va='center',
-                bbox=dict(facecolor='white', alpha=0.5, lw=0))
-    plt.show()
+    # model = linear_model.LinearRegression()
+    # model.fit(particles[:,1:], particles[:,0])
+    # coefs = model.coef_
+    # intercept = model.intercept_
+    # for particle in curr_list:
+    #     print(particle[0], intercept + coefs[0]*particle[1] + coefs[1]*particle[2])
+
+    # centroid_grid = [[] for i in range(m)]
+    # particles = som.particles
+    # positions = som.grid_locations
+    # for i, loc in enumerate(positions):
+    #     centroid_grid[loc[0]].append(particles[i].numpy())
+    # image_grid = np.array(centroid_grid)
+    # for d in range(image_grid.shape[-1]):
+    #     mean = np.mean(image_grid[:,:,d])
+    #     std = np.std(image_grid[:,:,d])
+    #     minval = mean-2*std
+    #     maxval = mean+2*std
+
+    #     diff =  maxval - minval
+    #     for x in range(image_grid.shape[0]):
+    #         for y in range(image_grid.shape[1]):
+    #             image_grid[x,y,d] = (image_grid[x,y,d] - minval) / diff
+
+    # plt.imshow(image_grid)
+    # plt.show()
+
