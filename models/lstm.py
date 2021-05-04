@@ -87,7 +87,7 @@ def train_LSTMs(name, model, data, num_epochs, optimizer, criterion):
     # plt.plot(hist)
 
 
-def test_LSTMs(name, model, data):
+def test_LSTMs(name, model, data, iter_num):
     df = data
 
     # First 20% is test data
@@ -101,12 +101,10 @@ def test_LSTMs(name, model, data):
     y_test = torch.from_numpy(np.asarray(y_test, dtype=np.float64)).type(torch.Tensor)
 
     # Load trained models
-    model.load_state_dict(torch.load('./saved_models/lstm/{}_lstm.pth'.format(name)))
+    model.load_state_dict(torch.load('../models/saved_models/lstm/{}_lstm_{}.pth'.format(name, iter_num)))
 
     outputs = model(x_test)
-    print(outputs)
-    _, predicted = torch.max(outputs, 1)
-    print(predicted)
+    return outputs.detach().numpy(), y_test.numpy()
 
     
 
@@ -117,4 +115,4 @@ if __name__=='__main__':
     criterion = torch.nn.MSELoss(reduction='mean')
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
     train_LSTMs('GE', model, data, 1000000, optimizer, criterion)
-    test_LSTMs('GE', model, data)
+    test_LSTMs('GE', model, data, 90000)

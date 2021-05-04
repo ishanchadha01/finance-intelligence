@@ -1,3 +1,2 @@
-*.csv
-*.pth
 __pycache__/
+deep_RL/
